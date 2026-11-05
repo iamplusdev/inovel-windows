@@ -11,6 +11,8 @@ asar: true
 compression: maximum
 win:
   icon: build/icon.ico
+  # 统一产物命名：portable → iNovel-{ver}-portable.exe，zip → iNovel-{ver}-portable.zip
+  artifactName: iNovel-${version}-portable.${ext}
   target:
     - target: portable
       arch:
@@ -18,7 +20,3 @@ win:
     - target: zip
       arch:
         - x64
-portable:
-  artifactName: iNovel-${version}-portable.exe
-zip:
-  artifactName: iNovel-${version}-portable.zip
