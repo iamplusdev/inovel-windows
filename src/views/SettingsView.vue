@@ -26,6 +26,16 @@ const closeAction = ref<"quit" | "minimize">("quit");
 const version = ref("");
 const saved = ref(false);
 
+// —— 自动更新 ——
+const autoCheck = ref(true);
+const checking = ref(false);
+const checkResult = ref(""); // 手动检查的结果文案
+const updateAvailable = ref(false);
+const updateVersion = ref("");
+const updating = ref(false);
+const updatePercent = ref(0);
+const updateError = ref("");
+
 const themeOptions: { value: "paper" | "warm" | "night"; label: string }[] = [
   { value: "paper", label: "纸白" },
   { value: "warm", label: "暖黄" },
@@ -59,7 +69,16 @@ onMounted(async () => {
   skipTaskbar.value = config.boss.skipTaskbar;
   bossKey.value = config.boss.toggleShortcut.replace("Control", "Ctrl") || "";
   closeAction.value = config.window.closeAction ?? "quit";
+  autoCheck.value = config.update.autoCheck ?? true;
   void loadFontList();
+  // 下载进度事件（手动"检查更新→立即下载"也复用主进程广播）
+  window.api.update.onProgress((p) => {
+    updatePercent.value = p.percent >= 0 ? p.percent : 0;
+  });
+  window.api.update.onError((message) => {
+    updateError.value = message;
+    updating.value = false;
+  });
 });
 
 /** 常见中文字体兜底列表（枚举不可用时） */
@@ -143,6 +162,9 @@ async function save() {
     window: {
       closeAction: closeAction.value,
     },
+    update: {
+      autoCheck: autoCheck.value,
+    },
   });
   saved.value = true;
   window.setTimeout(() => (saved.value = false), 1800);
@@ -151,6 +173,37 @@ async function save() {
 async function logout() {
   await session.logout();
   void router.push({ name: "login" });
+}
+
+/** 手动检查更新（设置页按钮） */
+async function checkUpdate(): Promise<void> {
+  checking.value = true;
+  checkResult.value = "";
+  updateAvailable.value = false;
+  updateError.value = "";
+  const result = await window.api.update.check();
+  checking.value = false;
+  if (!result.ok) {
+    checkResult.value = result.error ?? "检查失败";
+    return;
+  }
+  if (result.available && result.info) {
+    updateAvailable.value = true;
+    updateVersion.value = result.info.version;
+    checkResult.value = `发现新版本 v${result.info.version}（当前 v${result.currentVersion}）`;
+  } else {
+    checkResult.value = `已是最新版本（v${result.currentVersion}）`;
+  }
+}
+
+/** 设置页内直接下载新版本；完成后主进程会弹原生对话框决定运行方式 */
+async function startUpdateDownload(): Promise<void> {
+  updating.value = true;
+  updatePercent.value = 0;
+  updateError.value = "";
+  const result = await window.api.update.download();
+  updating.value = false;
+  if (!result.ok) updateError.value = result.error ?? "下载失败";
 }
 
 /** 在独立阅读窗口中打开阅读器骨架 */
@@ -303,6 +356,45 @@ function openReader(): void {
         </section>
       </div>
 
+      <!-- 通栏：更新 -->
+      <section class="page-card span-2">
+        <h2 class="section-title">更新</h2>
+        <div class="setting-row">
+          <span class="setting-label">启动时自动检查新版本</span>
+          <label class="switch">
+            <input v-model="autoCheck" type="checkbox" />
+            <span>{{ autoCheck ? "开" : "关" }}</span>
+          </label>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">手动检查更新</span>
+          <button
+            type="button"
+            class="ghost-btn sm"
+            :disabled="checking || updating"
+            @click="checkUpdate"
+          >
+            {{ checking ? "检查中…" : "检查更新" }}
+          </button>
+        </div>
+        <p v-if="checkResult" class="muted-xs hint" :class="{ 'is-accent': updateAvailable }">
+          {{ checkResult }}
+        </p>
+        <template v-if="updating">
+          <div class="progress-track">
+            <div class="progress-fill" :style="{ width: `${updatePercent}%` }"></div>
+          </div>
+          <p class="muted-xs hint">下载中 {{ updatePercent }}%（完成后会询问是否运行）</p>
+        </template>
+        <div v-else-if="updateAvailable" class="setting-row">
+          <span class="setting-label">下载 v{{ updateVersion }}</span>
+          <button type="button" class="ghost-btn sm" :disabled="checking" @click="startUpdateDownload">
+            立即下载
+          </button>
+        </div>
+        <p v-if="updateError" class="muted-xs hint update-error">{{ updateError }}</p>
+      </section>
+
       <!-- 通栏：窗口行为 + 快捷键 -->
       <section class="page-card span-2">
         <h2 class="section-title">窗口</h2>
@@ -413,6 +505,29 @@ function openReader(): void {
 
 .hint {
   margin: 8px 0 0;
+}
+
+.hint.is-accent {
+  color: var(--color-accent);
+}
+
+.update-error {
+  color: #d54941;
+}
+
+.progress-track {
+  height: 6px;
+  margin: 8px 0 2px;
+  border-radius: 3px;
+  background: var(--color-surface-2);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--color-accent);
+  transition: width 0.3s ease;
 }
 
 .theme-options {

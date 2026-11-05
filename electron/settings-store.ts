@@ -46,6 +46,14 @@ export interface ReaderWindowSettings {
   height: number;
 }
 
+/** 自动更新设置 */
+export interface UpdateSettings {
+  /** 启动时自动检查新版本 */
+  autoCheck: boolean;
+  /** 用户选择"暂不更新"的版本号：该版本不再弹窗，更新的版本仍会提醒 */
+  ignoredVersion: string;
+}
+
 export interface AppConfig {
   serverUrl: string;
   username: string;
@@ -54,6 +62,7 @@ export interface AppConfig {
   boss: BossSettings;
   window: WindowSettings;
   readerWindow: ReaderWindowSettings;
+  update: UpdateSettings;
 }
 
 const DEFAULT_CONFIG: AppConfig = {
@@ -73,6 +82,7 @@ const DEFAULT_CONFIG: AppConfig = {
   boss: { doubleClickHide: true, skipTaskbar: false, toggleShortcut: "Control+Alt+Q" },
   window: { width: 1180, height: 780, maximized: false, closeAction: "quit" },
   readerWindow: { width: 480, height: 720 },
+  update: { autoCheck: true, ignoredVersion: "" },
 };
 
 let cachedDataDir: string | null = null;
@@ -117,6 +127,7 @@ export function loadConfig(): AppConfig {
     boss: { ...DEFAULT_CONFIG.boss, ...(partial.boss ?? {}) },
     window: { ...DEFAULT_CONFIG.window, ...(partial.window ?? {}) },
     readerWindow: { ...DEFAULT_CONFIG.readerWindow, ...(partial.readerWindow ?? {}) },
+    update: { ...DEFAULT_CONFIG.update, ...(partial.update ?? {}) },
   };
   // 旧版 fontFamily 存的是枚举（"system"/"song"/"hei"），统一归一化为字体族名/空串
   if (merged.reader.fontFamily === "system") merged.reader.fontFamily = "";
@@ -135,6 +146,7 @@ export function saveConfig(patch: Partial<AppConfig>): AppConfig {
     boss: { ...current.boss, ...(patch.boss ?? {}) },
     window: { ...current.window, ...(patch.window ?? {}) },
     readerWindow: { ...current.readerWindow, ...(patch.readerWindow ?? {}) },
+    update: { ...current.update, ...(patch.update ?? {}) },
   };
   fs.writeFileSync(getConfigPath(), JSON.stringify(merged, null, 2), "utf-8");
   return merged;

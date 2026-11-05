@@ -19,6 +19,7 @@ export interface AppConfigShape {
   boss: { doubleClickHide: boolean; skipTaskbar: boolean; toggleShortcut: string };
   window: { width: number; height: number; maximized: boolean; closeAction: "quit" | "minimize" };
   readerWindow: { width: number; height: number };
+  update: { autoCheck: boolean; ignoredVersion: string };
 }
 
 export interface SettingsPatchShape {
@@ -33,6 +34,7 @@ export interface SettingsPatchShape {
     maximized: boolean;
     closeAction: "quit" | "minimize";
   }>;
+  update?: Partial<{ autoCheck: boolean; ignoredVersion: string }>;
 }
 
 export interface LocalProgressShape {
@@ -43,6 +45,33 @@ export interface LocalProgressShape {
   chapterPos: number;
   percent: number;
   updatedAt: string;
+}
+
+export interface UpdateAssetShape {
+  name: string;
+  url: string;
+  size: number;
+}
+
+export interface UpdateInfoShape {
+  version: string;
+  tag: string;
+  notes: string;
+  asset: UpdateAssetShape;
+}
+
+export interface UpdateProgressShape {
+  done: number;
+  total: number;
+  percent: number;
+}
+
+export interface UpdateCheckResultShape {
+  ok: boolean;
+  available?: boolean;
+  info?: UpdateInfoShape | null;
+  currentVersion: string;
+  error?: string;
 }
 
 export interface ApiResult<T = unknown> {
@@ -79,6 +108,15 @@ declare global {
       };
       app: {
         version: () => Promise<string>;
+      };
+      update: {
+        check: () => Promise<UpdateCheckResultShape>;
+        download: () => Promise<{ ok: boolean; path?: string; error?: string }>;
+        install: () => Promise<{ ok: boolean; error?: string }>;
+        ignoreVersion: (version: string) => Promise<{ ok: boolean }>;
+        onAvailable: (callback: (info: UpdateInfoShape) => void) => () => void;
+        onProgress: (callback: (p: UpdateProgressShape) => void) => () => void;
+        onError: (callback: (message: string) => void) => () => void;
       };
       boss: {
         hide: () => Promise<{ ok: boolean }>;

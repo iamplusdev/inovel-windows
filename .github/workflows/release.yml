@@ -1,0 +1,41 @@
+# 发布流水线：推送 v* tag 触发，在 Windows runner 上打包并创建 GitHub Release。
+# 产物：iNovel-{version}-portable.exe（便携版）+ iNovel-{version}-portable.zip（解压版）
+# 本地只执行 scripts/release.py（版本号同步 + tag），打包与发布全部在 CI 完成。
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck & build
+        run: npm run build
+
+      - name: Package (portable exe + zip)
+        run: npx electron-builder --win portable zip --publish never
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/iNovel-*-portable.exe
+            release/iNovel-*-portable.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

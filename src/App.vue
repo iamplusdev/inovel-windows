@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import TitleBar from "@/components/TitleBar.vue";
+import UpdateModal from "@/components/UpdateModal.vue";
 import { useSessionStore } from "@/stores/session";
 
 const route = useRoute();
@@ -39,5 +40,6 @@ onUnmounted(() => window.removeEventListener("resize", updateMaxState));
     <main class="app-main">
       <router-view />
     </main>
+    <UpdateModal />
   </div>
 </template>

@@ -23,6 +23,7 @@ import {
   showReaderWindow,
 } from "./window";
 import { destroyTray, ensureTray } from "./tray";
+import { registerUpdaterIpc, startupUpdateCheck } from "./updater";
 
 /** 401 时主进程主动通知渲染进程回到登录页 */
 const client = new ApiClient(() => {
@@ -354,8 +355,10 @@ function registerIpc(): void {
 
 app.whenReady().then(() => {
   registerIpc();
+  registerUpdaterIpc();
   createMainWindow();
   applyBossSettings();
+  startupUpdateCheck();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
   });

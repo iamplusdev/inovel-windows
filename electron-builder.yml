@@ -15,5 +15,10 @@ win:
     - target: portable
       arch:
         - x64
+    - target: zip
+      arch:
+        - x64
 portable:
   artifactName: iNovel-${version}-portable.exe
+zip:
+  artifactName: iNovel-${version}-portable.zip

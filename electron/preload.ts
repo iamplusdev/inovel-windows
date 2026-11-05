@@ -24,6 +24,30 @@ contextBridge.exposeInMainWorld("api", {
   app: {
     version: () => ipcRenderer.invoke("app:version"),
   },
+  update: {
+    check: () => ipcRenderer.invoke("update:check"),
+    download: () => ipcRenderer.invoke("update:download"),
+    install: () => ipcRenderer.invoke("update:install"),
+    ignoreVersion: (version: string) => ipcRenderer.invoke("update:ignoreVersion", version),
+    onAvailable: (callback: (info: unknown) => void) => {
+      const listener = (_e: unknown, info: unknown) => callback(info);
+      ipcRenderer.on("update:available", listener);
+      return () => ipcRenderer.removeListener("update:available", listener);
+    },
+    onProgress: (
+      callback: (p: { done: number; total: number; percent: number }) => void,
+    ) => {
+      const listener = (_e: unknown, p: { done: number; total: number; percent: number }) =>
+        callback(p);
+      ipcRenderer.on("update:progress", listener);
+      return () => ipcRenderer.removeListener("update:progress", listener);
+    },
+    onError: (callback: (message: string) => void) => {
+      const listener = (_e: unknown, message: string) => callback(message);
+      ipcRenderer.on("update:error", listener);
+      return () => ipcRenderer.removeListener("update:error", listener);
+    },
+  },
   boss: {
     hide: () => ipcRenderer.invoke("boss:hide"),
   },
