@@ -1,0 +1,244 @@
+:root {
+  color-scheme: light;
+  --color-bg: #f4f5f8;
+  --color-surface: #ffffff;
+  --color-surface-2: #eef0f5;
+  --color-border: #dfe3eb;
+  --color-border-strong: #c6ccd8;
+  --color-text: #20232a;
+  --color-text-2: #5d6472;
+  --color-text-3: #8a92a1;
+  --color-accent: #4c6fff;
+  --color-accent-soft: rgba(76, 111, 255, 0.12);
+  --color-danger: #c94444;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --shadow-sm: 0 1px 2px rgba(20, 25, 40, 0.05);
+  --shadow-md: 0 8px 24px rgba(20, 25, 40, 0.08);
+  --font-ui: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+  color: var(--color-text);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+/*
+ * 主窗口外壳：透明窗口内留 10px 外边距，用于绘制柔和投影，
+ * 让窗口轮廓与桌面背景区分开。投影分三层：
+ *   1. 1px 描边（确定边界）  2. 紧贴边缘的柔光（抹平圆角锯齿）  3. 下坠投影（层次感）
+ * 最大化时收起边距与圆角（is-max，由 App.vue 监听尺寸切换）。
+ */
+.app-shell {
+  height: calc(100vh - 20px);
+  margin: 10px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--color-bg);
+  color: var(--color-text);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    0 0 0 1px var(--color-border-strong),
+    0 0 5px 1px rgba(20, 25, 40, 0.1),
+    0 5px 16px rgba(20, 25, 40, 0.16);
+}
+
+.app-shell.is-max {
+  height: 100vh;
+  margin: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.app-shell.is-immersive {
+  height: 100vh;
+  margin: 0;
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.app-main {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  /* 内容区不显示滚动条，仍可滚动 */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.app-main::-webkit-scrollbar {
+  display: none;
+  width: 0;
+}
+
+.app-shell.is-immersive .app-main {
+  overflow: hidden;
+}
+
+.page {
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 28px 32px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 40px;
+}
+
+.page-title {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.page-subtitle {
+  margin: 4px 0 0;
+  color: var(--color-text-3);
+  font-size: 12px;
+}
+
+.page-card {
+  padding: 20px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+/* 卡片小节标题：统一色条锚点，全局一致（书库/详情/设置共用） */
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.section-title::before {
+  content: "";
+  flex: none;
+  width: 3px;
+  height: 13px;
+  border-radius: 2px;
+  background: var(--color-accent);
+}
+
+.muted {
+  color: var(--color-text-2);
+}
+
+.muted-xs {
+  color: var(--color-text-3);
+  font-size: 12px;
+}
+
+.primary-btn,
+.ghost-btn {
+  height: 34px;
+  padding: 0 16px;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease,
+    filter 0.15s ease;
+}
+
+.primary-btn {
+  border: none;
+  background: var(--color-accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.primary-btn:hover {
+  filter: brightness(1.08);
+}
+
+.primary-btn:active {
+  filter: brightness(0.96);
+}
+
+.ghost-btn {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-2);
+}
+
+.ghost-btn:hover {
+  border-color: var(--color-border-strong);
+  color: var(--color-text);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-label {
+  font-size: 12px;
+  color: var(--color-text-2);
+}
+
+.field-input {
+  height: 36px;
+  padding: 0 11px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-2);
+  color: var(--color-text);
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.field-input:focus {
+  border-color: var(--color-accent);
+  background: var(--color-surface);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+
+.empty-state {
+  padding: 42px 20px;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-3);
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.7;
+}

@@ -1,0 +1,35 @@
+{
+  "name": "inovel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Windows desktop reader for novel-server",
+  "author": "iamplus",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "npm run build:electron && concurrently -k \"vite --host 127.0.0.1\" \"npm:dev:electron\"",
+    "dev:electron": "wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
+    "build:electron": "tsc -p electron/tsconfig.json",
+    "build": "npm run typecheck && vite build && npm run build:electron",
+    "typecheck": "vue-tsc --noEmit",
+    "start": "electron .",
+    "package:portable": "npm run build && cross-env ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --win portable"
+  },
+  "dependencies": {
+    "koffi": "^3.3.6",
+    "pinia": "^2.3.0",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "concurrently": "^9.1.0",
+    "cross-env": "^10.0.0",
+    "electron": "^45.2.2",
+    "electron-builder": "^26.18.0",
+    "typescript": "~5.6.3",
+    "vite": "^6.4.3",
+    "vue-tsc": "^2.1.10",
+    "wait-on": "^9.0.0"
+  }
+}

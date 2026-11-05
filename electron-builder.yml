@@ -1,0 +1,19 @@
+appId: com.iamplus.inovel
+productName: iNovel
+directories:
+  output: release
+files:
+  - dist/**
+  - dist-electron/**
+  - build/icon.ico
+  - package.json
+asar: true
+compression: maximum
+win:
+  icon: build/icon.ico
+  target:
+    - target: portable
+      arch:
+        - x64
+portable:
+  artifactName: iNovel-${version}-portable.exe
