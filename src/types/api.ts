@@ -18,6 +18,17 @@ export interface BookListItem {
   read_at?: string;
   status?: string;
   tags?: string[];
+  /** 书架来源：both=双端共有 / server=仅服务端 / legado=仅手机在线 */
+  origin?: "both" | "server" | "legado";
+  /** 服务端是否有正文可阅读；仅 Legado 在线书为 false，id 为负数 */
+  readable?: boolean;
+  shelf_id?: number | null;
+  source_name?: string;
+  book_url?: string;
+  source_url?: string;
+  latest_chapter?: string;
+  dur_chapter_title?: string;
+  full_intro?: string;
 }
 
 export interface PagedResult<T> {
