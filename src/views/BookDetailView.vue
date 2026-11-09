@@ -115,9 +115,10 @@ function onFilterInput(): void {
   }, 300);
 }
 
-/** 在独立阅读窗口中打开本书 */
-function openReader(): void {
-  void window.api.window.enterReader(bookId.value);
+/** 在独立阅读窗口中打开本书；从目录点章时把 chapter id 传进去，
+ *  阅读器会直接打开该章（而不是恢复上次进度/第一章） */
+function openReader(ch?: TocItem): void {
+  void window.api.window.enterReader(bookId.value, ch?.id);
 }
 
 /** 定位当前阅读章节：先翻到所在页，再滚动高亮 */
@@ -200,7 +201,7 @@ onMounted(async () => {
             <span class="progress-text">已读 {{ book.read_percent ?? 0 }}%</span>
           </div>
           <div class="actions">
-            <button type="button" class="primary-btn" @click="openReader">
+            <button type="button" class="primary-btn" @click="openReader()">
               {{ hasProgress ? "继续阅读" : "开始阅读" }}
             </button>
           </div>
@@ -239,7 +240,7 @@ onMounted(async () => {
             class="chapter-item"
             :class="{ 'is-current': ch.index === currentChapterIndex }"
             :title="ch.name || ch.title"
-            @click="openReader"
+            @click="openReader(ch)"
           >
             <span class="chapter-index">{{ ch.index }}</span>
             <span class="chapter-name">{{ ch.name || ch.title }}</span>

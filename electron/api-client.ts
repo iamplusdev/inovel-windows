@@ -178,6 +178,14 @@ export class ApiClient {
     });
   }
 
+  /** 书库打开时批量拉取 WebDAV 进度（扫描远端进度文件并写回 DB） */
+  pullAllLegado(): Promise<unknown> {
+    return this.request("POST", "/api/admin/sync/pull-all", {
+      body: {},
+      timeoutMs: 30000,
+    });
+  }
+
   pushLegado(bookId: number, body?: unknown): Promise<unknown> {
     return this.request("POST", `/api/admin/books/${bookId}/sync/push`, {
       body: body ?? {},

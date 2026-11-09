@@ -101,10 +101,11 @@ declare global {
         maximize: () => Promise<boolean>;
         close: () => Promise<void>;
         onCaptionDblClick: (callback: () => void) => () => void;
-        enterReader: (bookId?: string | number) => Promise<boolean>;
+        enterReader: (bookId?: string | number, chapterId?: number) => Promise<boolean>;
         exitReader: () => Promise<boolean>;
         readerResize: (width: number, height: number) => Promise<boolean>;
         readerReady: () => void;
+        onOpenChapter: (callback: (chapterId: number) => void) => () => void;
       };
       app: {
         version: () => Promise<string>;
@@ -141,7 +142,8 @@ declare global {
       ) => Promise<ApiResult>;
       saveLocalProgress: (data: LocalProgressShape) => Promise<{ ok: boolean }>;
       loadLocalProgress: (bookId: number) => Promise<LocalProgressShape | null>;
-      pullLegadoProgress: (bookId: number, data?: unknown) => Promise<ApiResult>;
+      pullAllLegadoProgress: () => Promise<ApiResult>;
+  pullLegadoProgress: (bookId: number, data?: unknown) => Promise<ApiResult>;
       pushLegadoProgress: (bookId: number, data?: unknown) => Promise<ApiResult>;
       getSettings: () => Promise<AppConfigShape>;
       setSettings: (patch: SettingsPatchShape) => Promise<AppConfigShape>;

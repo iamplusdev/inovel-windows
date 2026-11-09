@@ -70,6 +70,9 @@ export const bridge = {
   },
 
   // Legado 同步
+  async pullAllLegadoProgress(): Promise<{ enabled?: boolean; updated?: number }> {
+    return unwrap(await window.api.pullAllLegadoProgress());
+  },
   async pullLegadoProgress(bookId: number, data?: unknown): Promise<unknown> {
     return unwrap(await window.api.pullLegadoProgress(bookId, data));
   },

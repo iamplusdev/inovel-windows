@@ -105,7 +105,7 @@ function goPage(p: number): void {
   void loadPage(p);
 }
 
-async function loadContinue(): Promise<void> {
+async function fetchContinue(): Promise<void> {
   try {
     const data = await bridge.getBooks<PagedResult<BookListItem>>({
       read: true,
@@ -120,6 +120,61 @@ async function loadContinue(): Promise<void> {
   } catch {
     continueBooks.value = [];
   }
+}
+
+// —— 书库打开时从 WebDAV 批量同步进度 ——
+// 手机 Legado 写的新进度只在 WebDAV 里，服务端 DB 不会自己更新；
+// 打开书库（含阅读窗口关闭后）先在后台批量拉取，有更新再刷新卡片与封面进度条。
+const PROGRESS_SYNC_THROTTLE = 15_000;
+let lastProgressSyncAt = 0;
+let syncPromise: Promise<boolean> | null = null;
+/** 老服务端没有 /sync/pull-all 时降级为逐本 pull，避免每次都吃 404 */
+let batchSyncSupported = true;
+
+function syncProgressFromWebDAV(): Promise<boolean> {
+  if (!session.authed) return Promise.resolve(false);
+  if (Date.now() - lastProgressSyncAt < PROGRESS_SYNC_THROTTLE) return Promise.resolve(false);
+  if (syncPromise) return syncPromise;
+  syncPromise = (async () => {
+    try {
+      if (batchSyncSupported) {
+        try {
+          const result = await bridge.pullAllLegadoProgress();
+          lastProgressSyncAt = Date.now();
+          return (result?.updated ?? 0) > 0;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "";
+          if (/404|not found/i.test(msg)) batchSyncSupported = false;
+          else return false; // 网络异常静默降级，下次打开会重试
+        }
+      }
+      // 老服务端：对当前继续阅读卡片逐本 pull，写回 DB
+      let changed = false;
+      await Promise.all(
+        continueBooks.value.slice(0, 20).map(async (book) => {
+          try {
+            const r = (await bridge.pullLegadoProgress(book.id)) as { updated?: boolean };
+            if (r?.updated) changed = true;
+          } catch {
+            // 单本失败不影响其它书
+          }
+        }),
+      );
+      lastProgressSyncAt = Date.now();
+      return changed;
+    } finally {
+      syncPromise = null;
+    }
+  })();
+  return syncPromise;
+}
+
+async function loadContinue(): Promise<void> {
+  await fetchContinue();
+  // 后台同步，不阻塞书库首屏；有更新时刷新整页数据
+  void syncProgressFromWebDAV().then((changed) => {
+    if (changed) void refresh();
+  });
 }
 
 // —— 继续阅读横滑：左右箭头 + 滚轮横向滚动，无滚动条 ——

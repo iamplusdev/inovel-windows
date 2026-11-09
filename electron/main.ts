@@ -173,10 +173,11 @@ function registerIpc(): void {
   // 双击隐藏通过 window.ts 的 WM_NCLBUTTONDBLCLK 钩子转发，不再程序化移动窗口
 
   // 阅读窗口：独立 BrowserWindow，按阅读器尺寸直接创建（主窗口不变尺寸）
-  ipcMain.handle("readerWindow:enter", (_e, bookId?: string | number) => {
-    console.log("[reader] enter requested, bookId =", bookId);
+  // 目录点章时带上 chapterId：新建窗口写进 hash；已开窗口由 window.ts 发事件切章
+  ipcMain.handle("readerWindow:enter", (_e, bookId?: string | number, chapterId?: number) => {
+    console.log("[reader] enter requested, bookId =", bookId, "chapterId =", chapterId);
     try {
-      const ok = openReaderWindow(bookId);
+      const ok = openReaderWindow(bookId, chapterId);
       console.log("[reader] openReaderWindow returned", ok);
       return ok;
     } catch (err) {
@@ -324,6 +325,14 @@ function registerIpc(): void {
   });
 
   // —— Legado WebDAV 同步 ——
+  ipcMain.handle("pullAllLegadoProgress", async () => {
+    try {
+      return { ok: true, data: await client.pullAllLegado() };
+    } catch (err) {
+      return { ok: false as const, error: errorMessage(err) };
+    }
+  });
+
   ipcMain.handle("pullLegadoProgress", async (_e, bookId: number, data?: unknown) => {
     try {
       return { ok: true, data: await client.pullLegado(bookId, data) };

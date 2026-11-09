@@ -177,8 +177,15 @@ const READER_MIN = { width: 220, height: 100 };
  * 打开独立阅读窗口：按阅读器专属尺寸直接新建 BrowserWindow（主窗口不变尺寸、暂时隐藏），
  * 从结构上避免透明窗口 resize 的重绘残留。关闭时恢复主窗口。
  */
-export function openReaderWindow(bookId?: string | number): boolean {
+export function openReaderWindow(
+  bookId?: string | number,
+  chapterId?: string | number,
+): boolean {
   if (readerWindow && !readerWindow.isDestroyed()) {
+    // 已开的阅读窗口：直接让它切到指定章节（避免重建窗口丢失阅读状态）
+    if (chapterId !== undefined && chapterId !== null && chapterId !== "") {
+      readerWindow.webContents.send("reader:open-chapter", Number(chapterId));
+    }
     readerWindow.show();
     readerWindow.focus();
     return true;
@@ -283,7 +290,12 @@ export function openReaderWindow(bookId?: string | number): boolean {
     }
   });
 
-  const hash = `books/${bookId ?? "demo"}/read`;
+  // 目录点章：把目标章节带进 hash 路由，ReaderView 据此直接打开该章
+  const chapterQuery =
+    chapterId !== undefined && chapterId !== null && chapterId !== ""
+      ? `?chapter=${encodeURIComponent(String(chapterId))}`
+      : "";
+  const hash = `books/${bookId ?? "demo"}/read${chapterQuery}`;
   const devServerUrl = process.env.VITE_DEV_SERVER_URL;
   const loadPromise = devServerUrl
     ? readerWindow.loadURL(`${devServerUrl}#${hash}`)

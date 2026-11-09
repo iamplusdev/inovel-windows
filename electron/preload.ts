@@ -14,12 +14,18 @@ contextBridge.exposeInMainWorld("api", {
       ipcRenderer.on("reader:caption-dblclick", listener);
       return () => ipcRenderer.removeListener("reader:caption-dblclick", listener);
     },
-    enterReader: (bookId?: string | number) =>
-      ipcRenderer.invoke("readerWindow:enter", bookId),
+    enterReader: (bookId?: string | number, chapterId?: number) =>
+      ipcRenderer.invoke("readerWindow:enter", bookId, chapterId),
     exitReader: () => ipcRenderer.invoke("readerWindow:exit"),
     readerResize: (width: number, height: number) =>
       ipcRenderer.invoke("readerWindow:resize", width, height),
     readerReady: () => ipcRenderer.send("readerWindow:ready"),
+    /** 阅读窗口已存在时，主进程要求切换到指定章节 */
+    onOpenChapter: (callback: (chapterId: number) => void) => {
+      const listener = (_e: unknown, chapterId: number) => callback(chapterId);
+      ipcRenderer.on("reader:open-chapter", listener);
+      return () => ipcRenderer.removeListener("reader:open-chapter", listener);
+    },
   },
   app: {
     version: () => ipcRenderer.invoke("app:version"),
@@ -68,6 +74,7 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("saveProgress", bookId, data),
   saveLocalProgress: (data: unknown) => ipcRenderer.invoke("saveLocalProgress", data),
   loadLocalProgress: (bookId: number) => ipcRenderer.invoke("loadLocalProgress", bookId),
+  pullAllLegadoProgress: () => ipcRenderer.invoke("pullAllLegadoProgress"),
   pullLegadoProgress: (bookId: number, data?: unknown) =>
     ipcRenderer.invoke("pullLegadoProgress", bookId, data),
   pushLegadoProgress: (bookId: number, data?: unknown) =>

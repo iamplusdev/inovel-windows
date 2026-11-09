@@ -154,12 +154,27 @@ const currentIndex = computed(() => {
   return toc.value.findIndex((c) => c.id === current.value!.id);
 });
 
+/** 用户主动选章标记：目录点章 / 键盘切章 / 详情页带 chapter 参数进入后，
+ *  启动时的进度恢复与 WebDAV 自动跳转都不能覆盖用户的选择 */
+let userChoseChapter = false;
+/** 章节加载中的排队：加载未完成时点目录不再被静默丢弃 */
+let pendingChapter: TocItem | null = null;
+let chapterSeq = 0;
+let offOpenChapter: (() => void) | null = null;
+/** 阅读窗口已存在时主进程发来的切章请求（目录加载完成前先暂存） */
+let externalChapterId = 0;
+
 /** 打开指定章节；restoreRatio 为章内滚动恢复比例 */
 async function openChapter(ch: TocItem, restoreRatio = 0) {
-  if (chapterLoading.value) return;
+  if (chapterLoading.value) {
+    pendingChapter = ch;
+    return;
+  }
   chapterLoading.value = true;
+  const seq = ++chapterSeq;
   try {
     const data = await bridge.getChapter<{ content: string }>(bookId.value, ch.id);
+    if (seq !== chapterSeq) return;
     current.value = ch;
     const text = String(data.content ?? "");
     paragraphs.value = text
@@ -182,7 +197,18 @@ async function openChapter(ch: TocItem, restoreRatio = 0) {
     showToast(err instanceof Error ? err.message : "章节加载失败");
   } finally {
     chapterLoading.value = false;
+    if (pendingChapter) {
+      const next = pendingChapter;
+      pendingChapter = null;
+      void openChapter(next, 0);
+    }
   }
+}
+
+/** 用户主动切章（目录抽屉、左右方向键、详情页目录），标记后禁止自动跳章覆盖 */
+function chooseChapter(ch: TocItem): void {
+  userChoseChapter = true;
+  void openChapter(ch, 0);
 }
 
 function prevChapter() {
@@ -191,7 +217,7 @@ function prevChapter() {
     showToast("已经是第一章");
     return;
   }
-  void openChapter(toc.value[i - 1]);
+  chooseChapter(toc.value[i - 1]);
 }
 
 function nextChapter() {
@@ -200,7 +226,7 @@ function nextChapter() {
     showToast("已经是最后一章");
     return;
   }
-  void openChapter(toc.value[i + 1]);
+  chooseChapter(toc.value[i + 1]);
 }
 
 function toggleToc() {
@@ -466,6 +492,12 @@ onMounted(async () => {
   offSessionExpired = window.api.onSessionExpired(() =>
     void window.api.window.exitReader(),
   );
+  // 阅读窗口已打开时，从详情页目录点另一章：主进程直接发事件切章
+  offOpenChapter = window.api.window.onOpenChapter((chapterId) => {
+    const ch = toc.value.find((c) => c.id === chapterId) ?? null;
+    if (ch) chooseChapter(ch);
+    else externalChapterId = chapterId;
+  });
 
   // 首次进入阅读模式显示一次操作提示，之后不再打扰
   if (!localStorage.getItem("inovel_reader_hint_shown")) {
@@ -495,30 +527,42 @@ onMounted(async () => {
       bookName.value = detail?.name ?? "";
       toc.value = await loadTocAll();
 
-      // 起始章节：本地进度与服务端进度取较新者（服务端跨设备/重装后仍可恢复）
-      let start: TocItem | null = null;
+      // 起始章节：详情页目录点章 > 本地/服务端进度（显式选择优先，进度恢复兜底）
+      // 注意：本页路由在 hash 内（#/books/1/read?chapter=5），query 由 vue-router 解析
+      const q = route.query.chapter;
+      const queryId = Number(Array.isArray(q) ? q[0] : q);
+      const requestedId =
+        Number.isFinite(queryId) && queryId > 0 ? queryId : externalChapterId;
+      externalChapterId = 0;
+      const explicit =
+        requestedId > 0 ? (toc.value.find((c) => c.id === requestedId) ?? null) : null;
+      let start: TocItem | null = explicit;
       let restoreRatio = 0;
       let fromServer = false;
-      const localTime = localProgress?.updatedAt ? Date.parse(localProgress.updatedAt) : 0;
-      const serverIndex = detail?.read_chapter_index ?? -1;
-      const serverTime = parseServerTime(detail?.read_at);
-      if (serverIndex >= 0 && serverTime > localTime) {
-        const sc = toc.value.find((c) => c.index === serverIndex) ?? null;
-        if (sc) {
-          start = sc;
-          fromServer = true;
+      if (explicit) userChoseChapter = true;
+
+      if (!start) {
+        const localTime = localProgress?.updatedAt ? Date.parse(localProgress.updatedAt) : 0;
+        const serverIndex = detail?.read_chapter_index ?? -1;
+        const serverTime = parseServerTime(detail?.read_at);
+        if (serverIndex >= 0 && serverTime > localTime) {
+          const sc = toc.value.find((c) => c.index === serverIndex) ?? null;
+          if (sc) {
+            start = sc;
+            fromServer = true;
+          }
         }
+        if (!start && localProgress) {
+          if (localProgress.chapterId) {
+            start = toc.value.find((c) => c.id === localProgress.chapterId) ?? null;
+          }
+          if (!start && localProgress.chapterIndex >= 0) {
+            start = toc.value.find((c) => c.index === localProgress.chapterIndex) ?? null;
+          }
+          restoreRatio = localProgress.scrollRatio || 0;
+        }
+        if (!start) start = toc.value[0] ?? null;
       }
-      if (!start && localProgress) {
-        if (localProgress.chapterId) {
-          start = toc.value.find((c) => c.id === localProgress.chapterId) ?? null;
-        }
-        if (!start && localProgress.chapterIndex >= 0) {
-          start = toc.value.find((c) => c.index === localProgress.chapterIndex) ?? null;
-        }
-        restoreRatio = localProgress.scrollRatio || 0;
-      }
-      if (!start) start = toc.value[0] ?? null;
 
       if (start) {
         await openChapter(start, restoreRatio);
@@ -530,10 +574,12 @@ onMounted(async () => {
       }
 
       // —— WebDAV 进度拉取：服务端对比远端后写回 DB；远端更新则跳转（最新者胜） ——
-      if (syncToLegado.value && toc.value.length > 0) {
+      // 用户已明确选章（详情页目录 / 抽屉目录 / 键盘切章）时不再自动跳章
+      if (syncToLegado.value && toc.value.length > 0 && !userChoseChapter) {
         void (async () => {
           try {
             const resp = await bridge.pullLegadoProgress(bookId.value);
+            if (userChoseChapter) return; // 拉取期间用户点了章节
             const r = resp as {
               enabled?: boolean;
               updated?: boolean;
@@ -587,6 +633,8 @@ onMounted(async () => {
 onUnmounted(() => {
   offSessionExpired?.();
   offSessionExpired = null;
+  offOpenChapter?.();
+  offOpenChapter = null;
   window.removeEventListener("keydown", onKeydown);
   window.clearTimeout(toastTimer);
   window.clearTimeout(hintTimer);
@@ -651,7 +699,7 @@ onUnmounted(() => {
               type="button"
               class="toc-item"
               :class="{ 'is-current': current && ch.id === current.id }"
-              @click="openChapter(ch)"
+              @click="chooseChapter(ch)"
             >
               {{ ch.name || ch.title }}
             </button>
