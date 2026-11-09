@@ -70,7 +70,18 @@ export const bridge = {
   },
 
   // Legado 同步
-  async pullAllLegadoProgress(): Promise<{ enabled?: boolean; updated?: number }> {
+  /** 书库打开时批量拉取 WebDAV 进度；只同步书库中已存在的书籍 */
+  async pullAllLegadoProgress(): Promise<{
+    enabled?: boolean;
+    listed?: boolean;
+    remote_files?: number;
+    matched?: number;
+    ignored?: number;
+    ignored_sample?: string[];
+    scanned?: number;
+    updated?: number;
+    errors?: number;
+  }> {
     return unwrap(await window.api.pullAllLegadoProgress());
   },
   async pullLegadoProgress(bookId: number, data?: unknown): Promise<unknown> {

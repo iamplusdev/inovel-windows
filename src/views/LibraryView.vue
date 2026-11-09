@@ -125,6 +125,8 @@ async function fetchContinue(): Promise<void> {
 // —— 书库打开时从 WebDAV 批量同步进度 ——
 // 手机 Legado 写的新进度只在 WebDAV 里，服务端 DB 不会自己更新；
 // 打开书库（含阅读窗口关闭后）先在后台批量拉取，有更新再刷新卡片与封面进度条。
+// 只同步书库中已存在的书籍：手机书架通常更大，书库外的进度文件由服务端忽略，
+// 继续阅读列表永远不会出现书库外的书。
 const PROGRESS_SYNC_THROTTLE = 15_000;
 let lastProgressSyncAt = 0;
 let syncPromise: Promise<boolean> | null = null;
@@ -141,6 +143,9 @@ function syncProgressFromWebDAV(): Promise<boolean> {
         try {
           const result = await bridge.pullAllLegadoProgress();
           lastProgressSyncAt = Date.now();
+          console.debug(
+            `[sync] WebDAV 批量进度：远端 ${result.remote_files ?? 0} 个文件 / 命中书库 ${result.matched ?? 0} 本 / 忽略书库外 ${result.ignored ?? 0} 个 / 更新 ${result.updated ?? 0} 本`,
+          );
           return (result?.updated ?? 0) > 0;
         } catch (err) {
           const msg = err instanceof Error ? err.message : "";
