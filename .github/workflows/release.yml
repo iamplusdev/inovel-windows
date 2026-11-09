@@ -1,11 +1,21 @@
 # 发布流水线：推送 v* tag 触发，在 Windows runner 上打包并创建 GitHub Release。
 # 产物：iNovel-{version}-portable.exe（便携版）+ iNovel-{version}-portable.zip（解压版）
 # 本地只执行 scripts/release.py（版本号同步 + tag），打包与发布全部在 CI 完成。
+#
+# CI 失败重跑：Actions 页手动运行本 workflow，填入已有 tag（如 v0.1.1）即可，
+# 不需要删除/重打 tag。打包步骤对 electron-builder 的外部二进制下载做了缓存与重试，
+# 避免 GitHub 偶发 504 Gateway Time-out 直接判定失败。
 name: release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要重新打包发布的已有 tag（如 v0.1.1）"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -15,11 +25,24 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 手动重跑时打包原 tag 的代码，而不是默认分支
+          ref: ${{ inputs.tag || github.ref }}
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+
+      - name: Cache Electron / electron-builder downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~\AppData\Local\electron\Cache
+            ~\AppData\Local\electron-builder\Cache
+          key: ${{ runner.os }}-electron-builder-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-builder-
 
       - name: Install dependencies
         run: npm ci
@@ -28,11 +51,27 @@ jobs:
         run: npm run build
 
       - name: Package (portable exe + zip)
-        run: npx electron-builder --win portable zip --publish never
+        shell: pwsh
+        run: |
+          # GitHub 的 pwsh 模板会把 $ErrorActionPreference 设为 stop，
+          # 且 PS7 默认让 native 命令非零退出直接抛异常，会让重试循环失效。
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          for ($i = 1; $i -le 3; $i++) {
+            Write-Host "::group::electron-builder attempt $i / 3"
+            npx electron-builder --win portable zip --publish never
+            $code = $LASTEXITCODE
+            Write-Host "::endgroup::"
+            if ($code -eq 0) { exit 0 }
+            Write-Host "::warning::electron-builder 第 $i 次失败（exit $code），准备重试"
+            if ($i -lt 3) { Start-Sleep -Seconds (15 * $i) }
+          }
+          exit 1
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
           files: |
             release/iNovel-*-portable.exe
             release/iNovel-*-portable.zip
