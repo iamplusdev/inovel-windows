@@ -1,6 +1,12 @@
 import { execFile } from "node:child_process";
 import { app, BrowserWindow, globalShortcut, ipcMain, session } from "electron";
-import { ApiClient, ApiError, normalizeServerUrl, testConnection } from "./api-client";
+import {
+  ApiClient,
+  ApiError,
+  RequestCanceledError,
+  normalizeServerUrl,
+  testConnection,
+} from "./api-client";
 import { clearPassword, clearToken, loadPassword, savePassword } from "./session-store";
 import {
   loadConfig,
@@ -271,6 +277,14 @@ function registerIpc(): void {
     }
   });
 
+  ipcMain.handle("getBookFacets", async () => {
+    try {
+      return { ok: true, data: await client.getBookFacets() };
+    } catch (err) {
+      return { ok: false as const, error: errorMessage(err) };
+    }
+  });
+
   ipcMain.handle("getBook", async (_e, bookId: number) => {
     try {
       return { ok: true, data: await client.getBook(bookId) };
@@ -290,9 +304,71 @@ function registerIpc(): void {
     },
   );
 
-  ipcMain.handle("getChapter", async (_e, bookId: number, chapterId: number) => {
+  // 同一时间只保留一个用户正文请求；预取走独立通道，不抢占用户请求
+  let activeChapterLoad: AbortController | null = null;
+  let activePrefetch: AbortController | null = null;
+  ipcMain.handle("getChapter", async (_e, bookId: number, chapterId: number, etag?: string) => {
+    activeChapterLoad?.abort();
+    // 不中止预取：用户可能正在等待同一章的预取结果，由渲染层复用
+    const controller = new AbortController();
+    activeChapterLoad = controller;
     try {
-      return { ok: true, data: await client.getChapter(bookId, chapterId) };
+      return {
+        ok: true,
+        data: await client.getChapter(bookId, chapterId, etag, controller.signal),
+      };
+    } catch (err) {
+      if (err instanceof RequestCanceledError) return { ok: false as const, canceled: true };
+      return { ok: false as const, error: errorMessage(err) };
+    } finally {
+      if (activeChapterLoad === controller) activeChapterLoad = null;
+    }
+  });
+
+  ipcMain.handle("prefetchChapter", async (_e, bookId: number, chapterId: number) => {
+    activePrefetch?.abort();
+    const controller = new AbortController();
+    activePrefetch = controller;
+    try {
+      return {
+        ok: true,
+        data: await client.getChapter(bookId, chapterId, undefined, controller.signal),
+      };
+    } catch (err) {
+      if (err instanceof RequestCanceledError) return { ok: false as const, canceled: true };
+      return { ok: false as const, error: errorMessage(err) };
+    } finally {
+      if (activePrefetch === controller) activePrefetch = null;
+    }
+  });
+
+  // —— 在线书换源 ——
+  ipcMain.handle("getBookSources", async (_e, bookId: number) => {
+    try {
+      return { ok: true, data: await client.getBookSources(bookId) };
+    } catch (err) {
+      return { ok: false as const, error: errorMessage(err) };
+    }
+  });
+
+  ipcMain.handle(
+    "switchBookSource",
+    async (
+      _e,
+      bookId: number,
+      data: { source_id: number; book_url: string; toc_url?: string; word_count?: number },
+    ) => {
+      try {
+        return { ok: true, data: await client.switchBookSource(bookId, data) };
+      } catch (err) {
+        return { ok: false as const, error: errorMessage(err) };
+      }
+    },
+  );
+
+  ipcMain.handle("adoptShelfBook", async (_e, shelfId: number) => {
+    try {
+      return { ok: true, data: await client.adoptShelfBook(shelfId) };
     } catch (err) {
       return { ok: false as const, error: errorMessage(err) };
     }

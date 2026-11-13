@@ -1,97 +1,34 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
+import { onMounted, onUnmounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import { bridge } from "@/api/bridge";
 import type { TocItem } from "@/types/api";
+import { useReaderChapter } from "@/views/reader/useReaderChapter";
+import { useReaderProgress } from "@/views/reader/useReaderProgress";
+import { useReaderSettings } from "@/views/reader/useReaderSettings";
+import { useReaderSources } from "@/views/reader/useReaderSources";
+import { useReaderViewport } from "@/views/reader/useReaderViewport";
 
 const route = useRoute();
-
-const theme = ref<"paper" | "warm" | "night">("paper");
-const alpha = ref(0.9);
-/** 字体不透明度 0–1（只作用于文字颜色） */
-const textAlpha = ref(1);
-const fontSize = ref(19);
-const lineHeight = ref(1.9);
-/** 正文字体族名（空串=系统默认衬线）与字体颜色（空串=主题默认） */
-const fontFamily = ref("");
-const fontColor = ref("");
-/** 摸鱼：双击阅读区隐藏窗口 */
-const doubleClickHide = ref(true);
 
 const scrollRef = ref<HTMLElement | null>(null);
 const toast = ref("");
 const showHint = ref(false);
-let toastTimer = 0;
-let hintTimer = 0;
-let offSessionExpired: (() => void) | null = null;
-
-// —— 真实章节状态 ——
+/** 章内滚动比例 0–1：驱动常驻进度条 */
+const chapterRatio = ref(0);
+/** 摸鱼：双击阅读区隐藏窗口 */
+const doubleClickHide = ref(true);
 
 /** 书籍 ID（路由 /books/:id/read） */
 const bookId = ref(0);
 const bookName = ref("");
-/** 完整目录（分页拉全） */
-const toc = ref<TocItem[]>([]);
-/** 当前章节 */
-const current = ref<TocItem | null>(null);
-/** 章节正文段落 */
-const paragraphs = ref<string[]>([]);
-const chapterLoading = ref(false);
-/** 目录抽屉 */
-const tocOpen = ref(false);
-const tocFilter = ref("");
-const filteredToc = computed(() => {
-  const kw = tocFilter.value.trim().toLowerCase();
-  if (!kw) return toc.value;
-  return toc.value.filter((c) => (c.name || c.title || "").toLowerCase().includes(kw));
-});
+/** 服务端登记为在线书（正文按需从书源抓取）才显示换源入口 */
+const isOnline = ref(false);
 
-const themeRgb: Record<string, string> = {
-  paper: "247 245 240",
-  warm: "243 231 211",
-  night: "18 22 28",
-};
-
-/** 各主题默认文字色（自定义 fontColor 优先） */
-const themeTextColor: Record<string, string> = {
-  paper: "#282a2f",
-  warm: "#3b2f22",
-  night: "#d6dbe5",
-};
-
-/** #rrggbb → rgba(含透明度)；无法解析时原样返回 */
-function withAlpha(hex: string, a: number): string {
-  const m = hex.trim().match(/^#([0-9a-f]{6})$/i);
-  if (!m) return hex;
-  const n = parseInt(m[1], 16);
-  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
-}
-
-/** 最终文字颜色 = 自定义颜色/主题默认色 + 字体透明度 */
-const textColor = computed(() => {
-  const base = fontColor.value || themeTextColor[theme.value] || themeTextColor.paper;
-  const a = Math.min(1, Math.max(0.05, textAlpha.value));
-  return withAlpha(base, a);
-});
-
-const surfaceStyle = computed(() => ({
-  "--reader-bg-rgb": themeRgb[theme.value] || themeRgb.paper,
-  "--reader-bg-alpha": String(Math.min(1, Math.max(0, alpha.value))),
-  fontSize: `${fontSize.value}px`,
-  lineHeight: String(lineHeight.value),
-  fontFamily: fontFamily.value
-    ? `"${fontFamily.value}", "Microsoft YaHei", system-ui, sans-serif`
-    : undefined,
-  color: textColor.value,
-}));
-
-const lowAlpha = computed(() => alpha.value < 0.3);
-
-/** 骨架示例（无 bookId 时兜底展示） */
-const demoParagraphs = [
-  "这是 iNovel 的阅读器骨架，用于验证无边框窗口、沉浸阅读和正文背景透明度。",
-  "打开书库选择一本书即可阅读真实章节内容。",
-];
+let toastTimer = 0;
+let hintTimer = 0;
+let offSessionExpired: (() => void) | null = null;
+let offOpenChapter: (() => void) | null = null;
 
 function showToast(message: string) {
   toast.value = message;
@@ -99,251 +36,120 @@ function showToast(message: string) {
   toastTimer = window.setTimeout(() => (toast.value = ""), 1800);
 }
 
-/** 一行文字的实际像素高度（滚动按整行对齐） */
-function linePx(): number {
-  return Math.max(1, fontSize.value * lineHeight.value);
-}
+const {
+  theme,
+  themeOptions,
+  alpha,
+  fontSize,
+  lineHeight,
+  margin,
+  fontFamily,
+  settingsOpen,
+  fonts,
+  surfaceStyle,
+  lowAlpha,
+  linePx,
+  loadFonts,
+  persistReader,
+  setTheme,
+  changeFontSize,
+  resetFontSize,
+  applyReaderConfig,
+} = useReaderSettings(showToast);
 
-/** 按整行滚动：目标位置对齐到行网格，正文不会停在半行 */
-function scrollByLines(lines: number) {
-  const el = scrollRef.value;
-  if (!el || lines === 0) return;
-  const lpx = linePx();
-  const max = el.scrollHeight - el.clientHeight;
-  const target = Math.round(el.scrollTop / lpx) * lpx + lines * lpx;
-  el.scrollTop = Math.max(0, Math.min(max, target));
-}
-
-/** 滚轮：累积增量凑整行（drag 区滚轮由主进程注入而来） */
-let wheelAcc = 0;
-function onWheel(e: WheelEvent) {
-  e.preventDefault();
-  const lpx = linePx();
-  wheelAcc += e.deltaY;
-  const lines = Math.trunc(wheelAcc / lpx);
-  if (lines !== 0) {
-    wheelAcc -= lines * lpx;
-    scrollByLines(lines);
-  }
-}
-
-function changeFontSize(delta: number) {
-  const next = Math.min(28, Math.max(14, fontSize.value + delta));
-  if (next === fontSize.value) return;
-  fontSize.value = next;
-  void bridge.setSettings({ reader: { fontSize: next } });
-  showToast(`字号 ${next}px`);
-}
-
-// —— 目录与章节加载 ——
-
-/** 分页拉全目录（500/页，40 页保护） */
-async function loadTocAll(): Promise<TocItem[]> {
-  const all: TocItem[] = [];
-  for (let page = 1; page <= 40; page++) {
-    const resp = await bridge.getToc<{ items: TocItem[]; total: number }>(bookId.value, page);
-    all.push(...(resp.items ?? []));
-    if (all.length >= (resp.total ?? 0) || (resp.items ?? []).length === 0) break;
-  }
-  return all;
-}
-
-/** 当前章在目录中的序号 */
-const currentIndex = computed(() => {
-  if (!current.value) return -1;
-  return toc.value.findIndex((c) => c.id === current.value!.id);
+const {
+  toc,
+  current,
+  paragraphs,
+  tocOpen,
+  tocFilter,
+  filteredToc,
+  currentIndex,
+  userChoseChapter,
+  externalChapterId,
+  demoParagraphs,
+  loadTocAll,
+  openChapter,
+  chooseChapter,
+  prevChapter,
+  nextChapter,
+  toggleToc,
+  invalidateChapters,
+} = useReaderChapter({
+  bookId,
+  scrollRef,
+  settingsOpen,
+  chapterRatio,
+  linePx,
+  showToast,
+  persist: () => saveProgress(true),
 });
 
-/** 用户主动选章标记：目录点章 / 键盘切章 / 详情页带 chapter 参数进入后，
- *  启动时的进度恢复与 WebDAV 自动跳转都不能覆盖用户的选择 */
-let userChoseChapter = false;
-/** 章节加载中的排队：加载未完成时点目录不再被静默丢弃 */
-let pendingChapter: TocItem | null = null;
-let chapterSeq = 0;
-let offOpenChapter: (() => void) | null = null;
-/** 阅读窗口已存在时主进程发来的切章请求（目录加载完成前先暂存） */
-let externalChapterId = 0;
+const {
+  sourceOpen,
+  sourceLoading,
+  sourceError,
+  sourceHint,
+  sourceItems,
+  sourceCurrent,
+  switchingSource,
+  openSourcePicker,
+  loadSourceCandidates,
+  applySource,
+} = useReaderSources({
+  bookId,
+  bookName,
+  isOnline,
+  current,
+  scrollRef,
+  toc,
+  paragraphs,
+  demoParagraphs,
+  settingsOpen,
+  tocOpen,
+  loadTocAll,
+  openChapter,
+  invalidateChapters,
+  persist: () => saveProgress(true),
+  showToast,
+});
 
-/** 打开指定章节；restoreRatio 为章内滚动恢复比例 */
-async function openChapter(ch: TocItem, restoreRatio = 0) {
-  if (chapterLoading.value) {
-    pendingChapter = ch;
-    return;
-  }
-  chapterLoading.value = true;
-  const seq = ++chapterSeq;
-  try {
-    const data = await bridge.getChapter<{ content: string }>(bookId.value, ch.id);
-    if (seq !== chapterSeq) return;
-    current.value = ch;
-    const text = String(data.content ?? "");
-    paragraphs.value = text
-      .split(/\r?\n+/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-    tocOpen.value = false;
-    await nextTick();
-    // 恢复章内滚动位置（对齐行网格）
-    const el = scrollRef.value;
-    if (el) {
-      const lpx = linePx();
-      const max = el.scrollHeight - el.clientHeight;
-      const target = Math.round(restoreRatio * max / lpx) * lpx;
-      el.scrollTop = Math.max(0, Math.min(max, target));
-    }
-    // 切章是关键节点：立即写本地 + 服务端 + 推 Legado
-    saveProgress(true);
-  } catch (err) {
-    showToast(err instanceof Error ? err.message : "章节加载失败");
-  } finally {
-    chapterLoading.value = false;
-    if (pendingChapter) {
-      const next = pendingChapter;
-      pendingChapter = null;
-      void openChapter(next, 0);
-    }
-  }
-}
+const {
+  overallPercent,
+  parseServerTime,
+  saveProgress,
+  onScroll,
+  startPull,
+  applySyncConfig,
+  disposeProgress,
+} = useReaderProgress({
+  bookId,
+  toc,
+  current,
+  currentIndex,
+  paragraphs,
+  scrollRef,
+  chapterRatio,
+  linePx,
+  showToast,
+  openChapter,
+  userChoseChapter,
+});
 
-/** 用户主动切章（目录抽屉、左右方向键、详情页目录），标记后禁止自动跳章覆盖 */
-function chooseChapter(ch: TocItem): void {
-  userChoseChapter = true;
-  void openChapter(ch, 0);
-}
+const { scrollByLines, onWheel, onResizeStart, onHandleDblClick } = useReaderViewport({
+  scrollRef,
+  linePx,
+  showToast,
+  doubleClickHide,
+});
 
-function prevChapter() {
-  const i = currentIndex.value;
-  if (i <= 0) {
-    showToast("已经是第一章");
-    return;
-  }
-  chooseChapter(toc.value[i - 1]);
-}
-
-function nextChapter() {
-  const i = currentIndex.value;
-  if (i < 0 || i >= toc.value.length - 1) {
-    showToast("已经是最后一章");
-    return;
-  }
-  chooseChapter(toc.value[i + 1]);
-}
-
-function toggleToc() {
-  tocOpen.value = !tocOpen.value;
-  if (tocOpen.value) tocFilter.value = "";
-}
-
-// —— 进度保存与恢复 ——
-
-/** 同步开关（服务端 DB + Legado WebDAV） */
-const syncToServer = ref(true);
-const syncToLegado = ref(true);
-/** 服务端未配置 WebDAV 时只提示一次，不弹错误 */
-let webdavMissingHinted = false;
-
-/** 进度百分比：按章节位置 + 章内滚动比例折算（读至第 i 章顶部≈i/total，章末=100% 更平滑） */
-function progressPercent(ratio = 0): number {
-  const total = toc.value.length;
-  const i = currentIndex.value;
-  if (total <= 0 || i < 0) return 0;
-  return Math.min(100, Math.max(0, Math.round(((i + ratio) / total) * 100)));
-}
-
-/**
- * 解析服务端时间。服务端存本地时区（UTC+8）无时区标记的 naive 时间，
- * 客户端无法确知其时区：取「按本地/按 UTC」两种解读中不晚于当前时间的最大者
- * （真实发生时间不可能在未来，故可排除错误解读导致的 8 小时偏移）。
- */
-function parseServerTime(iso?: string): number {
-  if (!iso) return 0;
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return 0;
-  if (/[Zz]$/.test(iso) || /[+-]\d{2}:?\d{2}$/.test(iso)) return t;
-  const asLocal = t;
-  const asUtc = t + new Date().getTimezoneOffset() * 60000;
-  const now = Date.now() + 120000; // 2 分钟时钟误差容忍
-  const valid = [asLocal, asUtc].filter((v) => v <= now);
-  return valid.length ? Math.max(...valid) : Math.min(asLocal, asUtc);
-}
-
-/** 当前章总字符数（估算 chapterPos 用） */
-const chapterChars = computed(() => paragraphs.value.reduce((n, p) => n + p.length, 0));
-
-let localSaveTimer = 0;
-let serverSaveAt = 0;
-let legadoPushAt = 0;
-/** 服务端写回失败只提示一次，避免阅读时频繁打扰 */
-let serverSyncErrorHinted = false;
-
-/** 推送进度到 WebDAV（经服务端 /sync/push 后台写入，最新者胜）；失败静默 */
-function pushLegado(ch: TocItem, chapterPos: number): void {
-  if (!syncToLegado.value) return;
-  void bridge
-    .pushLegadoProgress(bookId.value, {
-      chapter_id: ch.id,
-      chapter_pos: chapterPos,
-      client_time: Date.now(),
-    })
-    .catch(() => {
-      // 推送失败不阻塞阅读；下一次切章/停止滚动时重试
-    });
-}
-
-/** 保存进度；immediate=false 时走防抖（本地 700ms，Legado 10 秒） */
-function saveProgress(immediate = true) {
-  const ch = current.value;
-  if (!ch || !bookId.value) return;
-  const el = scrollRef.value;
-  const max = el ? Math.max(1, el.scrollHeight - el.clientHeight) : 1;
-  const ratio = el ? Math.min(1, Math.max(0, el.scrollTop / max)) : 0;
-  const payload = {
-    bookId: bookId.value,
-    chapterId: ch.id,
-    chapterIndex: ch.index,
-    scrollRatio: ratio,
-    chapterPos: Math.round(ratio * chapterChars.value),
-    percent: progressPercent(ratio),
-    updatedAt: new Date().toISOString(),
-  };
-  const doSave = (force: boolean) => {
-    void bridge.saveLocalProgress(payload);
-    // 服务端 DB 写回节流：15 秒内不重复（切章/关窗 force 立即写）
-    const now = Date.now();
-    if (syncToServer.value && (force || now - serverSaveAt > 15000)) {
-      serverSaveAt = now;
-      bridge
-        .saveProgress(bookId.value, {
-          percent: payload.percent,
-          chapter_index: ch.index,
-        })
-        .catch((err) => {
-          // 失败不阻塞阅读，但要让人知道（本地进度已保存，下次成功后会覆盖服务端）
-          if (!serverSyncErrorHinted) {
-            serverSyncErrorHinted = true;
-            showToast(
-              `进度同步失败：${err instanceof Error ? err.message : "未知错误"}（本地已保存）`,
-            );
-          }
-        });
-    }
-    // Legado WebDAV 推送：切章/关窗立即推；滚动停止约 10 秒推
-    if (force || now - legadoPushAt > 10000) {
-      legadoPushAt = now;
-      pushLegado(ch, payload.chapterPos);
-    }
-  };
-  window.clearTimeout(localSaveTimer);
-  if (immediate) {
-    doSave(true);
-  } else {
-    localSaveTimer = window.setTimeout(() => doSave(false), 700);
-  }
-}
-
-/** 滚动时防抖保存（滚轮注入/键盘滚动都会触发 scroll 事件） */
-function onScroll() {
-  if (current.value) saveProgress(false);
+/** 阅读设置抽屉：打开时收起其他抽屉并按需加载字体列表 */
+function toggleSettings(): void {
+  settingsOpen.value = !settingsOpen.value;
+  if (!settingsOpen.value) return;
+  tocOpen.value = false;
+  sourceOpen.value = false;
+  void loadFonts();
 }
 
 /** 退出前冲刷进度 */
@@ -355,16 +161,30 @@ function flushAndExit() {
 function onKeydown(event: KeyboardEvent) {
   if (event.key === "Escape") {
     event.preventDefault();
+    if (sourceOpen.value) {
+      sourceOpen.value = false;
+      return;
+    }
     if (tocOpen.value) {
       tocOpen.value = false;
+      return;
+    }
+    if (settingsOpen.value) {
+      settingsOpen.value = false;
       return;
     }
     // 独立阅读窗口：Esc 直接关闭窗口（主窗口自动恢复显示）
     flushAndExit();
     return;
   }
-  // 目录抽屉打开时输入框需要正常键入
-  if (tocOpen.value && event.target instanceof HTMLInputElement) return;
+  // 抽屉里的输入框/滑块/下拉框自行处理按键，不触发翻页快捷键
+  if (
+    event.target instanceof HTMLInputElement ||
+    event.target instanceof HTMLSelectElement ||
+    event.target instanceof HTMLTextAreaElement
+  ) {
+    return;
+  }
   const pageLines = Math.max(1, Math.floor((scrollRef.value?.clientHeight ?? 600) / linePx()));
   switch (event.key) {
     case "ArrowDown":
@@ -407,85 +227,17 @@ function onKeydown(event: KeyboardEvent) {
     case "0":
       if (event.ctrlKey) {
         event.preventDefault();
-        fontSize.value = 19;
-        void bridge.setSettings({ reader: { fontSize: 19 } });
-        showToast("字号 19px");
+        resetFontSize();
       }
       break;
   }
 }
 
-/** 摸鱼：双击瞬间隐藏窗口（主进程鼠标轮询判定，找回 = 托盘图标或老板键） */
-function onCaptionDblClick(): void {
-  if (!doubleClickHide.value) return;
-  void window.api.boss.hide();
-}
-
-/** 拖拽右下角手柄：直接缩放阅读窗口本身（窗口边界=正文边界，无内部空白） */
-const READER_DEFAULT = { width: 480, height: 720 };
-
-function onResizeStart(event: PointerEvent) {
-  event.preventDefault();
-  event.stopPropagation();
-  const handle = event.currentTarget as HTMLElement;
-  handle.setPointerCapture(event.pointerId);
-  const startX = event.clientX;
-  const startY = event.clientY;
-  const startW = window.innerWidth;
-  const startH = window.innerHeight;
-  let pending = false;
-  let nextW = startW;
-  let nextH = startH;
-
-  const apply = () => {
-    pending = false;
-    // 高度对齐整行网格：窗口高度=行高整数倍，底部不出现半行
-    const lpx = linePx();
-    const snappedH = Math.round(nextH / lpx) * lpx;
-    void window.api.window.readerResize(nextW, Math.max(lpx * 3, snappedH));
-  };
-
-  const onMove = (e: PointerEvent) => {
-    nextW = startW + (e.clientX - startX);
-    nextH = startH + (e.clientY - startY);
-    if (!pending) {
-      pending = true;
-      requestAnimationFrame(apply);
-    }
-  };
-  const onUp = () => {
-    handle.removeEventListener("pointermove", onMove);
-    handle.removeEventListener("pointerup", onUp);
-    handle.removeEventListener("pointercancel", onUp);
-  };
-  handle.addEventListener("pointermove", onMove);
-  handle.addEventListener("pointerup", onUp);
-  handle.addEventListener("pointercancel", onUp);
-}
-
-/** 双击手柄：恢复默认阅读窗口尺寸（高度同样对齐整行） */
-function onHandleDblClick(event: MouseEvent) {
-  event.stopPropagation();
-  const lpx = linePx();
-  void window.api.window.readerResize(
-    READER_DEFAULT.width,
-    Math.round(READER_DEFAULT.height / lpx) * lpx,
-  );
-  showToast("已恢复默认窗口大小");
-}
-
 onMounted(async () => {
   const config = await bridge.getSettings();
-  theme.value = config.reader.theme;
-  alpha.value = config.reader.bgAlpha;
-  textAlpha.value = config.reader.textAlpha ?? 1;
-  fontSize.value = config.reader.fontSize;
-  lineHeight.value = config.reader.lineHeight;
-  fontFamily.value = config.reader.fontFamily === "system" ? "" : config.reader.fontFamily || "";
-  fontColor.value = config.reader.fontColor || "";
+  applyReaderConfig(config.reader);
   doubleClickHide.value = config.boss.doubleClickHide;
-  syncToServer.value = config.sync.toServer !== false;
-  syncToLegado.value = config.sync.toLegado !== false;
+  applySyncConfig(config.sync);
 
   // 会话过期（401）：直接关闭阅读窗口，主窗口会自行回到登录页
   // （双击隐藏已由主进程鼠标轮询直接处理，渲染层无需监听）
@@ -496,7 +248,7 @@ onMounted(async () => {
   offOpenChapter = window.api.window.onOpenChapter((chapterId) => {
     const ch = toc.value.find((c) => c.id === chapterId) ?? null;
     if (ch) chooseChapter(ch);
-    else externalChapterId = chapterId;
+    else externalChapterId.value = chapterId;
   });
 
   // 首次进入阅读模式显示一次操作提示，之后不再打扰
@@ -517,6 +269,8 @@ onMounted(async () => {
         bridge
           .getBook<{
             name: string;
+            source?: string;
+            online?: boolean;
             chapter_count?: number;
             read_chapter_index?: number;
             read_at?: string;
@@ -525,6 +279,8 @@ onMounted(async () => {
         bridge.loadLocalProgress(idNum),
       ]);
       bookName.value = detail?.name ?? "";
+      isOnline.value = !!detail?.online;
+      sourceCurrent.value = detail?.source ?? "";
       toc.value = await loadTocAll();
 
       // 起始章节：详情页目录点章 > 本地/服务端进度（显式选择优先，进度恢复兜底）
@@ -532,14 +288,14 @@ onMounted(async () => {
       const q = route.query.chapter;
       const queryId = Number(Array.isArray(q) ? q[0] : q);
       const requestedId =
-        Number.isFinite(queryId) && queryId > 0 ? queryId : externalChapterId;
-      externalChapterId = 0;
+        Number.isFinite(queryId) && queryId > 0 ? queryId : externalChapterId.value;
+      externalChapterId.value = 0;
       const explicit =
         requestedId > 0 ? (toc.value.find((c) => c.id === requestedId) ?? null) : null;
       let start: TocItem | null = explicit;
       let restoreRatio = 0;
       let fromServer = false;
-      if (explicit) userChoseChapter = true;
+      if (explicit) userChoseChapter.value = true;
 
       if (!start) {
         const localTime = localProgress?.updatedAt ? Date.parse(localProgress.updatedAt) : 0;
@@ -573,51 +329,8 @@ onMounted(async () => {
         showToast("暂无章节内容");
       }
 
-      // —— WebDAV 进度拉取：服务端对比远端后写回 DB；远端更新则跳转（最新者胜） ——
-      // 用户已明确选章（详情页目录 / 抽屉目录 / 键盘切章）时不再自动跳章
-      if (syncToLegado.value && toc.value.length > 0 && !userChoseChapter) {
-        void (async () => {
-          try {
-            const resp = await bridge.pullLegadoProgress(bookId.value);
-            if (userChoseChapter) return; // 拉取期间用户点了章节
-            const r = resp as {
-              enabled?: boolean;
-              updated?: boolean;
-              chapter_id?: number;
-              chapter_pos?: number;
-              remote_time?: number;
-            };
-            if (r?.enabled === false && !webdavMissingHinted) {
-              webdavMissingHinted = true;
-              showToast("服务端未启用 WebDAV，阅读进度不与 Legado 同步");
-              return;
-            }
-            if (!r?.updated || !current.value) return;
-            // 本地进度可能比服务端 DB 还新（离线阅读过）：仍以最新者为准
-            const localMs = localProgress?.updatedAt
-              ? Date.parse(localProgress.updatedAt)
-              : 0;
-            const remoteMs = r.remote_time || 0;
-            if (remoteMs && localMs && remoteMs <= localMs) return;
-            const target = toc.value.find((c) => c.id === r.chapter_id) ?? null;
-            if (!target) return;
-            const sameChapter = target.id === current.value?.id;
-            if (!sameChapter) await openChapter(target, 0);
-            // 章内字符位置 → 行对齐滚动
-            const el = scrollRef.value;
-            if (el && (r.chapter_pos || 0) > 0) {
-              const per = Math.max(1, chapterChars.value);
-              const ratio = Math.min(1, (r.chapter_pos || 0) / per);
-              const lpx = linePx();
-              const max = Math.max(1, el.scrollHeight - el.clientHeight);
-              el.scrollTop = Math.round((ratio * max) / lpx) * lpx;
-            }
-            showToast("已同步 WebDAV 最新阅读进度");
-          } catch {
-            // 拉取失败不打扰阅读
-          }
-        })();
-      }
+      // WebDAV 进度拉取：远端更新则跳转（用户已选章时由 startPull 内部跳过）
+      startPull(localProgress);
     } else {
       paragraphs.value = demoParagraphs;
     }
@@ -638,7 +351,7 @@ onUnmounted(() => {
   window.removeEventListener("keydown", onKeydown);
   window.clearTimeout(toastTimer);
   window.clearTimeout(hintTimer);
-  window.clearTimeout(localSaveTimer);
+  disposeProgress();
   // 关窗前保存最终进度
   if (current.value && bookId.value) saveProgress(true);
 });
@@ -677,8 +390,23 @@ onUnmounted(() => {
       <!-- 顶部信息条：悬浮显示 -->
       <div class="reader-topbar">
         <span class="topbar-title">{{ bookName || "iNovel" }}<template v-if="current"> · {{ current.name || current.title }}</template></span>
+        <span class="topbar-percent">{{ overallPercent }}%</span>
+        <button
+          v-if="isOnline"
+          type="button"
+          class="topbar-btn"
+          @click="openSourcePicker"
+        >
+          换源
+        </button>
+        <button type="button" class="topbar-btn" @click="toggleSettings">设置</button>
         <button type="button" class="topbar-btn" @click="toggleToc">目录</button>
       </div>
+
+      <!-- 常驻退出按钮：不依赖顶栏悬浮 -->
+      <button type="button" class="reader-exit" title="退出阅读（Esc）" @click="flushAndExit">
+        ×
+      </button>
 
       <!-- 目录抽屉 -->
       <transition name="slide">
@@ -708,6 +436,156 @@ onUnmounted(() => {
         </aside>
       </transition>
 
+      <!-- 切换书源抽屉（仅在线书） -->
+      <transition name="slide">
+        <aside v-if="sourceOpen" class="source-drawer">
+          <div class="toc-head">
+            <strong class="source-title">切换书源</strong>
+            <button
+              type="button"
+              class="source-refresh"
+              :disabled="sourceLoading || !!switchingSource"
+              @click="loadSourceCandidates"
+            >
+              {{ sourceLoading ? "搜索中" : "重新搜索" }}
+            </button>
+            <button type="button" class="toc-close" @click="sourceOpen = false">×</button>
+          </div>
+          <div class="source-meta">
+            <span>当前：{{ sourceCurrent || "未知" }}</span>
+            <span v-if="sourceError" class="source-error">{{ sourceError }}</span>
+            <span v-else-if="sourceHint">{{ sourceHint }}</span>
+          </div>
+          <div class="toc-list">
+            <button
+              v-for="item in sourceItems"
+              :key="`${item.source_id}-${item.book_url}`"
+              type="button"
+              class="source-item"
+              :disabled="item.current || !!switchingSource"
+              @click="applySource(item)"
+            >
+              <span class="source-item-info">
+                <span class="source-item-name">
+                  {{ item.source_name || `书源 #${item.source_id}` }}
+                  <em v-if="item.current" class="source-current-tag">当前</em>
+                </span>
+                <span v-if="item.last_chapter" class="source-item-sub">
+                  最新：{{ item.last_chapter }}
+                </span>
+              </span>
+              <span class="source-item-action">
+                {{
+                  item.current
+                    ? "使用中"
+                    : switchingSource === item.source_id
+                      ? "切换中…"
+                      : "切换"
+                }}
+              </span>
+            </button>
+            <p v-if="!sourceLoading && !sourceItems.length" class="toc-empty">
+              {{ sourceError ? "搜索失败，可重试" : "没有找到其他书源" }}
+            </p>
+          </div>
+        </aside>
+      </transition>
+
+      <!-- 阅读设置抽屉：参数即时生效，松手/切换时持久化 -->
+      <transition name="slide">
+        <aside v-if="settingsOpen" class="settings-drawer">
+          <div class="toc-head">
+            <strong class="source-title">阅读设置</strong>
+            <button type="button" class="toc-close" @click="settingsOpen = false">×</button>
+          </div>
+          <div class="settings-body">
+            <div class="settings-row">
+              <span class="settings-label">主题</span>
+              <div class="settings-themes">
+                <button
+                  v-for="item in themeOptions"
+                  :key="item.value"
+                  type="button"
+                  class="settings-theme"
+                  :class="{ 'is-active': theme === item.value }"
+                  @click="setTheme(item.value)"
+                >
+                  {{ item.label }}
+                </button>
+              </div>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">字体</span>
+              <select v-model="fontFamily" class="settings-select" @change="persistReader">
+                <option value="">默认（系统衬线）</option>
+                <option v-for="name in fonts" :key="name" :value="name">{{ name }}</option>
+              </select>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">字号</span>
+              <div class="settings-range">
+                <input
+                  v-model.number="fontSize"
+                  type="range"
+                  min="14"
+                  max="28"
+                  step="1"
+                  @change="persistReader"
+                />
+                <span class="settings-value">{{ fontSize }}px</span>
+              </div>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">行距</span>
+              <div class="settings-range">
+                <input
+                  v-model.number="lineHeight"
+                  type="range"
+                  min="1.4"
+                  max="2.4"
+                  step="0.1"
+                  @change="persistReader"
+                />
+                <span class="settings-value">{{ lineHeight }}</span>
+              </div>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">页边距</span>
+              <div class="settings-range">
+                <input
+                  v-model.number="margin"
+                  type="range"
+                  min="8"
+                  max="48"
+                  step="2"
+                  @change="persistReader"
+                />
+                <span class="settings-value">{{ margin }}px</span>
+              </div>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">背景透明度</span>
+              <div class="settings-range">
+                <input
+                  v-model.number="alpha"
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  @change="persistReader"
+                />
+                <span class="settings-value">{{ Math.round(alpha * 100) }}%</span>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </transition>
+
+      <!-- 常驻迷你进度条：全书百分比（悬停顶栏可看数值） -->
+      <div class="reader-progress">
+        <div class="reader-progress-bar" :style="{ width: `${overallPercent}%` }" />
+      </div>
+
       <div
         class="resize-handle"
         title="拖拽调整窗口大小，双击恢复默认尺寸"
@@ -718,7 +596,7 @@ onUnmounted(() => {
 
     <transition name="fade">
       <div v-if="showHint" class="reader-hint">
-        ↑↓/空格滚动 · ←→ 切章 · T 目录 · 按住左键拖动窗口 · 双击隐藏 · 右下角调大小 · Esc 退出
+        ↑↓/空格滚动 · ←→ 切章 · T 目录 · Ctrl+± 字号 · 悬停顶栏可进设置 · 双击隐藏 · Esc 退出
       </div>
     </transition>
     <transition name="fade">
@@ -893,6 +771,12 @@ onUnmounted(() => {
   opacity: 0.65;
 }
 
+.topbar-percent {
+  flex: none;
+  font-size: 12px;
+  opacity: 0.65;
+}
+
 .topbar-btn {
   -webkit-app-region: no-drag;
   pointer-events: auto;
@@ -904,6 +788,57 @@ onUnmounted(() => {
   color: #f2f4f8;
   font-size: 12px;
   cursor: pointer;
+}
+
+/* 常驻退出按钮：低透明度，悬停阅读区或按钮本身时提亮 */
+.reader-exit {
+  -webkit-app-region: no-drag;
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(22, 25, 32, 0.45);
+  color: #f2f4f8;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.28;
+  transition: opacity 0.15s ease, background 0.15s ease;
+  z-index: 9;
+}
+
+.reader-page:hover .reader-exit {
+  opacity: 0.85;
+}
+
+.reader-exit:hover {
+  background: rgba(217, 75, 75, 0.85);
+  opacity: 1;
+}
+
+/* 常驻迷你进度条 */
+.reader-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgba(127, 127, 127, 0.18);
+  pointer-events: none;
+  z-index: 9;
+}
+
+.reader-progress-bar {
+  height: 100%;
+  background: #5b7cfa;
+  opacity: 0.75;
+  transition: width 0.15s ease;
 }
 
 /* 目录抽屉 */
@@ -997,6 +932,234 @@ onUnmounted(() => {
   text-align: center;
   font-size: 12px;
   opacity: 0.5;
+}
+
+/* 换源抽屉：与目录同款外观，避免小窗口里再叠弹窗 */
+.source-drawer {
+  -webkit-app-region: no-drag;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(320px, 90%);
+  display: flex;
+  flex-direction: column;
+  background: rgba(24, 27, 34, 0.96);
+  color: #e8ebf2;
+  z-index: 16;
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.35);
+}
+
+.source-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.source-refresh {
+  flex: none;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.source-refresh:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.source-refresh:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.source-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.source-meta .source-error {
+  color: #ff8a8a;
+  opacity: 1;
+}
+
+.source-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 14px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.source-item:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.source-item:disabled {
+  cursor: default;
+}
+
+.source-item-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.source-item-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-current-tag {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(88, 152, 255, 0.18);
+  color: #7cb8ff;
+  font-size: 10px;
+  font-style: normal;
+}
+
+.source-item-sub {
+  font-size: 11px;
+  opacity: 0.55;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-item-action {
+  flex: none;
+  font-size: 12px;
+  color: #7cb8ff;
+}
+
+.source-item:disabled .source-item-action {
+  color: inherit;
+  opacity: 0.45;
+}
+
+/* 阅读设置抽屉：与目录/换源同款暗色外观 */
+.settings-drawer {
+  -webkit-app-region: no-drag;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(300px, 88%);
+  display: flex;
+  flex-direction: column;
+  background: rgba(24, 27, 34, 0.96);
+  color: #e8ebf2;
+  z-index: 17;
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.35);
+}
+
+.settings-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.settings-row {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.settings-label {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.settings-themes {
+  display: flex;
+  gap: 6px;
+}
+
+.settings-theme {
+  flex: 1;
+  height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.settings-theme:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.settings-theme.is-active {
+  border-color: #7cb8ff;
+  background: rgba(88, 152, 255, 0.16);
+  color: #9cc8ff;
+}
+
+.settings-select {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.settings-select option {
+  background: #1b1f27;
+  color: #e8ebf2;
+}
+
+.settings-range {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-range input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  accent-color: #7cb8ff;
+}
+
+.settings-value {
+  flex: none;
+  min-width: 38px;
+  text-align: right;
+  font-size: 12px;
+  opacity: 0.75;
 }
 
 /* 目录抽屉动画：右侧滑入 */

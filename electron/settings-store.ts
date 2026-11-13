@@ -14,7 +14,8 @@ export interface ReaderSettings {
   bgAlpha: number;
   /** 正文字体不透明度 0–1，只作用于文字颜色 */
   textAlpha: number;
-  showProgressBar: boolean;
+  /** 正文左右页边距（px） */
+  margin: number;
 }
 
 export interface SyncSettings {
@@ -76,7 +77,7 @@ const DEFAULT_CONFIG: AppConfig = {
     theme: "paper",
     bgAlpha: 0.9,
     textAlpha: 1,
-    showProgressBar: false,
+    margin: 12,
   },
   sync: { toServer: true, toLegado: true },
   boss: { doubleClickHide: true, skipTaskbar: false, toggleShortcut: "Control+Alt+Q" },

@@ -38,6 +38,12 @@ export interface PagedResult<T> {
   items: T[];
 }
 
+/** 书库筛选候选（分类/书源，按书籍数量降序） */
+export interface BookFacets {
+  categories: string[];
+  sources: string[];
+}
+
 export interface BookDetail extends BookListItem {
   read_chapter_index: number;
 }

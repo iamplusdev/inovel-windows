@@ -12,6 +12,7 @@ const alpha = ref(0.9);
 const textAlpha = ref(1);
 const fontSize = ref(19);
 const lineHeight = ref(1.9);
+const margin = ref(12);
 const fontFamily = ref("");
 const fontColor = ref("");
 const systemFonts = ref<string[]>([]);
@@ -61,6 +62,7 @@ onMounted(async () => {
   textAlpha.value = config.reader.textAlpha ?? 1;
   fontSize.value = config.reader.fontSize;
   lineHeight.value = config.reader.lineHeight;
+  margin.value = config.reader.margin ?? 12;
   fontFamily.value = config.reader.fontFamily || "";
   fontColor.value = config.reader.fontColor || "";
   syncToServer.value = config.sync.toServer;
@@ -147,6 +149,7 @@ async function save() {
       textAlpha: textAlpha.value,
       fontSize: fontSize.value,
       lineHeight: lineHeight.value,
+      margin: margin.value,
       fontFamily: fontFamily.value,
       fontColor: fontColor.value,
     },
@@ -337,6 +340,13 @@ function openReader(): void {
             <div class="range-wrap">
               <input v-model.number="lineHeight" type="range" min="1.4" max="2.4" step="0.1" />
               <span class="range-value">{{ lineHeight }}</span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">页边距</span>
+            <div class="range-wrap">
+              <input v-model.number="margin" type="range" min="8" max="48" step="2" />
+              <span class="range-value">{{ margin }}px</span>
             </div>
           </div>
           <div class="setting-row">

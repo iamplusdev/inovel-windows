@@ -8,7 +8,7 @@ export interface ReaderSettingsShape {
   theme: "paper" | "warm" | "night";
   bgAlpha: number;
   textAlpha: number;
-  showProgressBar: boolean;
+  margin: number;
 }
 
 export interface AppConfigShape {
@@ -78,6 +78,8 @@ export interface ApiResult<T = unknown> {
   ok: boolean;
   data?: T;
   error?: string;
+  /** 请求被新请求中止（切章），调用方应静默丢弃 */
+  canceled?: boolean;
 }
 
 export interface LoginResult {
@@ -85,6 +87,12 @@ export interface LoginResult {
   serverUrl?: string;
   username?: string;
   error?: string;
+}
+
+export interface ChapterContentShape {
+  content: string;
+  etag: string;
+  notModified: boolean;
 }
 
 export interface ConnectionTestResultShape {
@@ -133,9 +141,24 @@ declare global {
       authMe: () => Promise<ApiResult>;
       testConnection: (serverUrl: string) => Promise<ConnectionTestResultShape>;
       getBooks: (params?: Record<string, string | number | boolean>) => Promise<ApiResult>;
+      getBookFacets: () => Promise<ApiResult>;
       getBook: (bookId: number) => Promise<ApiResult>;
       getToc: (bookId: number, page?: number, pageSize?: number) => Promise<ApiResult>;
-      getChapter: (bookId: number, chapterId: number) => Promise<ApiResult>;
+      getChapter: (
+        bookId: number,
+        chapterId: number,
+        etag?: string,
+      ) => Promise<ApiResult<ChapterContentShape>>;
+      prefetchChapter: (
+        bookId: number,
+        chapterId: number,
+      ) => Promise<ApiResult<ChapterContentShape>>;
+      getBookSources: (bookId: number) => Promise<ApiResult>;
+      switchBookSource: (
+        bookId: number,
+        data: { source_id: number; book_url: string; toc_url?: string; word_count?: number },
+      ) => Promise<ApiResult>;
+      adoptShelfBook: (shelfId: number) => Promise<ApiResult>;
       saveProgress: (
         bookId: number,
         data: { percent: number; chapter_index: number },

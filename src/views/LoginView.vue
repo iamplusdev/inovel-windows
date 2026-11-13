@@ -125,7 +125,8 @@ async function onConnect(event: Event) {
 
       <p v-if="notice" class="notice muted-xs" :class="`is-${noticeKind}`">{{ notice }}</p>
       <p class="muted-xs footnote">
-        省略协议时默认使用 http://。Token 与记住的密码均由 Windows DPAPI 加密保存。
+        内网地址可省略协议（默认 http://）；公网地址必须使用 https://，明文 HTTP 会被拒绝。
+        Token 与记住的密码均由 Windows DPAPI 加密保存。
       </p>
     </form>
   </div>

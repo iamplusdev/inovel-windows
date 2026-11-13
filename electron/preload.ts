@@ -65,11 +65,18 @@ contextBridge.exposeInMainWorld("api", {
   testConnection: (serverUrl: string) => ipcRenderer.invoke("testConnection", serverUrl),
   getBooks: (params?: Record<string, string | number | boolean>) =>
     ipcRenderer.invoke("getBooks", params),
+  getBookFacets: () => ipcRenderer.invoke("getBookFacets"),
   getBook: (bookId: number) => ipcRenderer.invoke("getBook", bookId),
   getToc: (bookId: number, page?: number, pageSize?: number) =>
     ipcRenderer.invoke("getToc", bookId, page, pageSize),
-  getChapter: (bookId: number, chapterId: number) =>
-    ipcRenderer.invoke("getChapter", bookId, chapterId),
+  getChapter: (bookId: number, chapterId: number, etag?: string) =>
+    ipcRenderer.invoke("getChapter", bookId, chapterId, etag),
+  prefetchChapter: (bookId: number, chapterId: number) =>
+    ipcRenderer.invoke("prefetchChapter", bookId, chapterId),
+  getBookSources: (bookId: number) => ipcRenderer.invoke("getBookSources", bookId),
+  switchBookSource: (bookId: number, data: unknown) =>
+    ipcRenderer.invoke("switchBookSource", bookId, data),
+  adoptShelfBook: (shelfId: number) => ipcRenderer.invoke("adoptShelfBook", shelfId),
   saveProgress: (bookId: number, data: { percent: number; chapter_index: number }) =>
     ipcRenderer.invoke("saveProgress", bookId, data),
   saveLocalProgress: (data: unknown) => ipcRenderer.invoke("saveLocalProgress", data),
